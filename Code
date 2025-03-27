@@ -1,0 +1,402 @@
+Gene Expression Omnibus (GEO) accession information. The National Center for Biotechnology Information GEO accession number for the RNA-seq data reported in this study is GSE97181.
+#!/bin/bash
+
+# List of SRA accessions
+sra_files=(
+    SRR5388577
+    SRR5388578
+    SRR5388579
+    SRR5388580
+    SRR5388581
+    SRR5388582
+    SRR5388583
+    SRR5388584
+)
+
+# Loop through each SRA accession and download the FASTQ files
+for sra in "${sra_files[@]}"
+do
+    echo "Downloading ${sra}..."
+    fastq-dump --split-3 --gzip $sra
+done
+sudo apt update
+
+
+#conda installation(
+
+mkdir -p ~/miniconda3
+
+(This creates a new directory (miniconda3) in the home folder (~). The -p option ensures that the parent directories are created if they don’t exist)
+
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
+
+(This command uses wget to download the Miniconda installation script from the official repository and saves it as miniconda.sh inside the ~/miniconda3 directory.)
+
+bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
+
+(This runs the Miniconda installer script. The options are:
+-b: Runs the installation in "batch mode" (no user input needed).
+-u: Updates Miniconda if it's already installed.
+-p ~/miniconda3: Specifies the installation path (~/miniconda3).)
+
+
+rm -rf ~/miniconda3/miniconda.sh
+(This command deletes the Miniconda installer script (miniconda.sh) after installation, freeing up space)
+
+~/miniconda3/bin/conda init bash
+(This initializes Conda for the bash shell by modifying the shell configuration files, so that you can use conda commands easily)
+
+source ~/.bashrc
+(This reloads the ~/.bashrc file, applying the changes made by conda init bash, so the conda command is ready to use in the current terminal session)
+
+conda --version
+(This command checks and displays the version of Conda that has been installed, confirming that it was set up correctly)
+
+conda create --name Seq
+(This creates a new Conda environment called "Seq" for your sequencing analysis tools. You can install different packages into this environment without interfering with other projects)
+
+conda activate Seq
+(This activates the "Seq" environment, so any packages installed or commands run will be specific to that environment)
+
+#tools for Seq analysis
+conda install -c bioconda sra-tools
+(This installs the sra-tools package from the bioconda channel, which contains tools for working with Sequence Read Archive (SRA) data)
+
+conda install -c bioconda fastqc
+(This installs FastQC, a tool for performing quality control on raw sequencing data, also from the bioconda channel)
+for i in *.fastq.gz; do fastqc $i; done
+#!/bin/bash
+
+# Path to Trimmomatic JAR file
+TRIMMOMATIC_JAR="trimmomatic"
+# Path to adapter file
+ADAPTER_FILE="$CONDA_PREFIX/share/trimmomatic/adapters/TruSeq3-SE.fa"
+
+# Loop through all FASTQ files in the current directory
+for file in *.fastq; do
+    # Extract the base name (e.g., SRRxxxx from SRRxxxx.fastq)
+    BASENAME=$(basename "$file" .fastq)
+    # Define the output file name
+    OUTPUT_FILE="${BASENAME}.trimmed.fastq"
+
+    # Run Trimmomatic
+    echo "Trimming $file..."
+    "$TRIMMOMATIC_JAR" SE -phred33 \
+        "$file" "$OUTPUT_FILE" \
+        ILLUMINACLIP:"$ADAPTER_FILE":2:30:10 \
+        LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+    echo "Finished trimming $file. Output: $OUTPUT_FILE"
+done
+
+echo "Trimming completed for all FASTQ files in the current directory." # Multiple-samples (single-end) (Save this script as a .sh (ex:salmon_quant.sh) file and grant execute permissions using the command chmod +x salmon_quant.sh):
+
+1- nano salmon_quant.sh
+2- copy and paste the below script:
+
+#!/bin/bash
+
+# Define the index and other parameters
+INDEX="salmon_index"
+
+# List of sample IDs
+SAMPLES=("SRRXXX" "SRRXXX" "SRRXXX" "SRRXXX" "SRRXXX" "SRRXXX" "SRRXXX" "SRRXXX")
+
+# Loop through each sample ID
+for SAMPLE in "${SAMPLES[@]}"
+do
+  # Run salmon quant
+  salmon quant -i $INDEX -l A -r ${SAMPLE}.trimmed.fastq.gz --validateMappings -o salmon_out/${SAMPLE} --threads 3
+  
+done
+
+3- ctrl x and save 
+
+4- chmod +x salmon_quant.sh
+
+5- ./salmon_quant.sh
+R studio section……
+```{R}
+
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("biomaRt")
+
+```
+
+```{r}
+
+# Load necessary libraries
+library(biomaRt)
+library(tximport)
+library(DESeq2)
+library(ggplot2)
+
+# 1️⃣ Connect to Ensembl 102 (GRCm38 for mouse)
+ensembl <- useMart("ENSEMBL_MART_ENSEMBL", 
+                   dataset = "mmusculus_gene_ensembl", 
+                   host = "https://nov2020.archive.ensembl.org")
+
+# List datasets to confirm connection
+datasets <- listDatasets(ensembl)
+print(datasets)
+
+# 2️⃣ Fetch the transcript-to-gene mapping
+tx2gene <- getBM(attributes = c("ensembl_transcript_id", "ensembl_gene_id"),
+                 mart = ensembl)
+
+# Rename columns for clarity
+colnames(tx2gene) <- c("transcript_id", "gene_id")
+
+# Save the mapping to a CSV file
+write.csv(tx2gene, "tx2gene_mouse_GRCm38.csv", row.names = FALSE)
+
+# Check the first few rows to ensure the data looks correct
+head(tx2gene)
+
+# 3️⃣ Define the directory path where quant.sf files are located
+dir_path <- "C:/Users/boghe/Downloads/salmon_out/"
+
+# List all subdirectories
+subdirs <- list.dirs(dir_path, full.names = TRUE, recursive = FALSE)
+
+# List all quant.sf files within each subdirectory
+quant_files <- unlist(lapply(subdirs, function(subdir) {
+  list.files(subdir, pattern = "quant.sf", full.names = TRUE)
+}))
+
+# Print the files to check if they are correctly listed
+print(quant_files)
+
+# Check if the number of files is as expected
+if (length(quant_files) != 8) {
+  stop("The number of quant.sf files found does not match the expected number (8). Check the directory and pattern.")
+}
+
+# 4️⃣ Create a sample table with sample names and conditions
+sample_names <- c("SRR5388577", "SRR5388578", "SRR5388579", "SRR5388580", 
+                  "SRR5388581", "SRR5388582", "SRR5388583", "SRR5388584")
+
+# Create sample table with factor levels for 'KO' as reference and 'CTL' as the second level
+sample_table <- data.frame(
+  sampleName = sample_names,
+  fileName = quant_files,
+  condition = factor(rep(c("CTL", "KO"), each = 4), levels = c("CTL", "KO"))
+)
+
+# Print the sample table to ensure it's correct
+print(sample_table)
+
+# 5️⃣ Read in Salmon quantification data using tximport
+txi <- tximport(quant_files, type = "salmon", tx2gene = tx2gene, ignoreTxVersion = TRUE)
+
+# 6️⃣ Create DESeq2 dataset
+dds <- DESeqDataSetFromTximport(txi,
+                                colData = sample_table,
+                                design = ~ condition)
+
+# 7️⃣ Pre-filtering (optional but recommended)
+dds <- dds[ rowSums(counts(dds)) > 1, ]
+
+# 8️⃣ Run the DESeq2 pipeline
+dds <- DESeq(dds)
+
+# 9️⃣ Results (KO vs CTL comparison)
+res <- results(dds, contrast = c("condition", "KO", "CTL"))
+
+# Output results to a file
+write.csv(as.data.frame(res), 
+          file = "C:/Users/boghe/Downloads/salmon_out/deseq2_results_2.csv")
+
+# 🔟 Plot results (MA-plot)
+plotMA(res, ylim = c(-2, 2))
+
+# Save the plot
+dev.copy(png, "C:/Users/boghe/Downloads/salmon_out/MA_plot_2.png")
+dev.off()
+
+```
+
+
+```{R}
+# 1️⃣ Fetch the mouse gene symbols and Ensembl gene IDs
+mouse_mapping <- getBM(attributes = c("mgi_symbol", "ensembl_gene_id"),
+                       mart = ensembl)
+
+# 2️⃣ Fetch the human gene symbols (corresponding to mouse homologs)
+human_mapping <- getBM(attributes = c("ensembl_gene_id", "hsapiens_homolog_associated_gene_name"),
+                       mart = ensembl)
+
+# Merge the mouse and human mappings by Ensembl gene ID
+gene_mapping <- merge(mouse_mapping, human_mapping, by = "ensembl_gene_id", all.x = TRUE)
+
+# Rename columns for clarity
+colnames(gene_mapping)[colnames(gene_mapping) == "mgi_symbol"] <- "mouse_gene_symbol"
+colnames(gene_mapping)[colnames(gene_mapping) == "hsapiens_homolog_associated_gene_name"] <- "human_gene_symbol"
+
+# Save the mapping to a CSV file
+write.csv(gene_mapping, "C:/Users/boghe/Downloads/salmon_out/mouse_to_human_gene_mapping.csv", row.names = FALSE)
+
+# Check the first few rows of the mapping
+head(gene_mapping)
+
+```
+
+
+
+Magma – 
+
+Step 1: Download MAGMA
+
+1. Go to the official MAGMA website: https://cncr.nl/research/magma/
+
+2. Download the Linux version “MAGMA v1.10 (updated 10/01/2022)”:
+
+• Select "Linux (Debian, 64 bits)"
+
+• This will save the file as magma_v1.10_linux.zip in your Downloads folder.
+
+
+Step 2: Create a Directory for MAGMA and Move the File
+
+3. Open a terminal and create a directory for MAGMA:
+
+mkdir ~/MAGMA
+
+4. Move into the newly created folder:
+
+cd ~/MAGMA
+
+5. Move the downloaded ZIP file to this folder:
+
+mv ~/Downloads/magma_v1.10_linux.zip ~/MAGMA/
+
+6. Extract the ZIP file:
+
+unzip magma_v1.10_linux.zip
+
+7. Make the magma binary executable:
+
+chmod +x magma
+
+8. Move magma to /usr/local/bin/ for system-wide access (requires sudo):
+
+sudo mv magma /usr/local/bin/
+
+9. Verify that MAGMA is installed by running:
+
+magma --help
+
+
+Step 3: Download Reference Data
+
+10. Download the Reference Data (1000 Genomes Project, European Population) • Go to https://cncr.nl/research/magma/
+
+• Download "g1000_eur.zip"
+
+11. Move the file to your MAGMA folder:
+
+mv ~/Downloads/g1000_eur.zip ~/MAGMA/
+
+12. Extract the file:
+
+unzip g1000_eur.zip
+
+
+Step 4: Download Gene Location Files (NCBI Build 37)
+
+13. Download "Gene locations, build 37" from: https://cncr.nl/research/magma/
+
+14. Move the file to the MAGMA directory:
+
+mv ~/Downloads/NCBI37.3.zip ~/MAGMA/
+
+15. Extract the file:
+
+unzip NCBI37.3.zip
+
+
+Step 5: Download GWAS Summary Statistics (PGC3 SCZ)
+
+16. Download the latest schizophrenia GWAS data (PGC3 SCZ Wave 3)
+
+• File: PGC3_SCZ_wave3_public.tsv
+
+
+17. Move the file to the MAGMA directory:
+
+mv ~/Downloads/PGC3_SCZ_wave3_public.tsv ~/MAGMA/
+
+
+Step 6: Annotate SNPs to Genes
+
+Note: The first step in the analysis is to link SNPs (Single Nucleotide Polymorphisms) to the genes that they may influence. This is done by using the gene location file (NCBI Build 37) and the SNP location file (from the 1000 Genomes data). SNPs are identified in the genomic sequence, and using the gene location data, we assign each SNP to a specific gene or genomic region. The annotation step will produce an output file with the .genes.annot suffix, with each row corresponding to a gene, containing the gene ID, a specification of the gene’s location, and a list of SNP IDs of SNPs mapped to that gene
+
+
+18. Run the following command to annotate SNPs based on gene locations (NCBI Build 37):
+
+./magma --annotate --snp-loc g1000_eur.bim --gene-loc NCBI37.3.gene.loc --out NCBI37_eur
+
+• ./magma: Runs the MAGMA program (ensure it is executable with chmod +x magma).
+
+• --annotate: Tells MAGMA to annotate SNPs to genes.
+
+• --snp-loc g1000_eur.bim: Specifies the SNP location file from the 1000 Genomes European (EUR) dataset.
+
+• --gene-loc NCBI37.3.gene.loc: Specifies the gene location file based on NCBI Build 37.
+
+• --out NCBI37_eur: Sets the output prefix for the annotated file (NCBI37_eur.genes.annot).
+
+
+Step 7: Perform Gene-Based Analysis
+
+
+Note: After annotating SNPs to genes, the next step is to perform a gene-based association test. This test looks at the aggregate effect of multiple SNPs within a gene. In the gene analysis step the gene p-values and other gene-level metrics are computed. Correlations between neighbouring genes are computed as well, in preparation for the gene-level analysis.
+
+19. Run MAGMA to perform gene-based association testing:
+
+./magma --bfile g1000_eur --pval PGC3_SCZ_wave3_public.tsv N=320404 --gene-annot NCBI37_eur.genes.annot --out Pergene_SCZ
+
+• --bfile g1000_eur: Reference data from 1000 Genomes (European)
+
+• --pval PGC3_SCZ_wave3_public.tsv N=320404: GWAS summary statistics, with N=320404 (total sample size from SCZ_GWAS)
+
+• --gene-annot NCBI37_eur.genes.annot: Gene annotation file
+
+• --out Pergene_SCZ: Output file prefix
+
+
+Step 8: Perform Gene-Set Analysis
+
+Note: The goal of gene-set analysis is to determine whether a group of genes (that are related by a common biological function or pathway) shows significant association with a trait or disease.
+
+20. To test if a specific gene set is enriched:
+
+./magma --gene-results Pergene_SCZ.genes.raw --set-annot Gene_Set_Tabs.txt --out Gene_set_SCZ_MAGMA
+
+• --gene-results Pergene_SCZ.genes.raw: Uses previous gene-based analysis results
+
+• --set-annot Gene_Set_Tabs.txt : Gene set file
+
+• --out Gene_set_SCZ_MAGMA: Output file prefix
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
